@@ -94,7 +94,7 @@
 <script>
 (function(){
 const D=DAI,$=s=>document.querySelector(s);
-const CK='dai_conversations_v1',CUR='dai_current_conversation_v1',SK='dai_chat_search_v1',WIN=30,MAXF=15*1024*1024;
+const CK='dai_conversations_v1',CUR='dai_current_conversation_v1',SK='dai_chat_search_v1',WIN=30,MAXF=10*1024*1024,MAXT=14*1024*1024;
 const SYS='당신은 사용자의 브라우저에서 동작하는 AI 어시스턴트입니다. 한국어로 간결하고 정확하게 답하세요. 이미지나 파일이 첨부되면 내용을 참고해서 답하세요. 실행 가능한 웹 코드를 요청받으면 하나의 완전한 HTML 문서(스타일과 스크립트 포함)를 ```html 코드펜스 안에 작성하세요.';
 let convs=D.store.get(CK,[]);if(!Array.isArray(convs))convs=[];
 let cur=D.store.get(CUR,null);if(typeof cur!=='string'){const r=D.store.raw(CUR);cur=r&&r.charAt(0)!=='"'?r:cur}
@@ -123,7 +123,7 @@ function openCanvas(code,lang){
   cvCode=code;$('#canvas').classList.add('open');$('#cv-title').textContent=(lang||'html').toUpperCase()+' 캔버스';$('#cv-code').textContent=code;
   let doc;const l=lang||'html';
   if(l==='html'||l==='svg')doc=code;
-  else if(l==='javascript'||l==='js')doc='<html><body style="font-family:sans-serif;padding:16px"><script>'+code+'<\/script></body></html>';
+  else if(l==='javascript'||l==='js')doc='<html><body style="font-family:sans-serif;padding:16px"><script>'+code.replace(/<\/script/gi,'<\\/script')+'<\/script></body></html>';
   else if(l==='css')doc='<html><head><style>'+code+'</style></head><body><p style="font-family:sans-serif;padding:16px;color:#888">CSS 전용 코드입니다.</p></body></html>';
   else doc=null;
   $('#cv-frame').srcdoc=doc==null?'':doc;cvTab(doc==null?'code':'preview');
@@ -135,7 +135,7 @@ $('#cv-copy').onclick=()=>D.copyText(cvCode);
 const previewable=l=>['html','svg','js','javascript','css'].includes(l);
 function codeCard(b){
   const c=D.el('div','code-card',D.icon('code').replace('<svg','<svg style="font-size:16px"')+'<div class="cc-tx"><div class="cc-t"></div><div class="cc-s"></div></div>'+D.icon('arrow'));
-  c.firstChild.outerHTML;const ic=D.el('div','cc-ic',D.icon('code'));c.replaceChild(ic,c.firstChild);
+  const ic=D.el('div','cc-ic',D.icon('code'));c.replaceChild(ic,c.firstChild);
   c.querySelector('.cc-t').textContent=(b.lang==='text'?'CODE':b.lang.toUpperCase())+' 코드'+(b.closed?'':' (작성 중…)');
   c.querySelector('.cc-s').textContent=previewable(b.lang)?'클릭해서 캔버스에서 열기':'클릭해서 코드 보기';
   c.onclick=()=>openCanvas(b.code,b.lang);return c;
@@ -152,11 +152,12 @@ function attChip(a){
   const n=D.el('span');n.textContent=a.name||'파일';e.appendChild(n);return e;
 }
 function addFile(f){
-  if(f.size>MAXF)return D.toast(f.name+' — 15MB를 넘는 파일은 첨부할 수 없어요.','error');
+  if(f.size>MAXF)return D.toast(f.name+' — 10MB를 넘는 파일은 첨부할 수 없어요.','error');
+  if(atts.reduce((n,a)=>n+(a.size||0),0)+f.size>MAXT)return D.toast('한 번에 보낼 수 있는 첨부는 합쳐서 14MB까지예요.','error');
   const rd=new FileReader();
   if(f.type.startsWith('image/')||f.type==='application/pdf'){
-    rd.onload=()=>{atts.push({kind:f.type==='application/pdf'?'pdf':'image',name:f.name,mimeType:f.type,b64:String(rd.result).split(',')[1]});paintAtts()};rd.readAsDataURL(f);
-  }else{rd.onload=()=>{atts.push({kind:'text',name:f.name,text:String(rd.result).slice(0,30000)});paintAtts()};rd.readAsText(f)}
+    rd.onload=()=>{atts.push({kind:f.type==='application/pdf'?'pdf':'image',name:f.name,mimeType:f.type,size:f.size,b64:String(rd.result).split(',')[1]});paintAtts()};rd.readAsDataURL(f);
+  }else{rd.onload=()=>{const t=String(rd.result);if(t.length>30000)D.toast(f.name+' — 앞부분 3만 자만 사용해요.');atts.push({kind:'text',name:f.name,text:t.slice(0,30000)});paintAtts()};rd.readAsText(f)}
 }
 $('#btn-attach').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{Array.from(e.target.files).forEach(addFile);e.target.value=''};
@@ -223,11 +224,14 @@ function paint(c,m){
 
 /* 전송 */
 function contentsFor(c){
-  return c.messages.slice(-WIN).filter(m=>!m.live).map(m=>{
+  const msgs=c.messages.slice(-WIN).filter(m=>!m.live),keep=new Set();let budget=MAXT;   // 최신 첨부부터 요청 한도(약 20MB) 안에서만 포함
+  for(let i=msgs.length-1;i>=0;i--)(msgs[i].atts||[]).forEach(a=>{if(a.b64){const sz=a.b64.length*.75;if(sz<=budget){budget-=sz;keep.add(a)}}});
+  return msgs.map(m=>{
     const parts=[];let t=txt(m);
     (m.atts||[]).forEach(a=>{
       if(a.kind==='text')t+='\n\n[첨부파일: '+a.name+']\n'+(a.text||'');
-      else if(a.b64)parts.push({inlineData:{mimeType:a.mimeType,data:a.b64}});
+      else if(a.b64&&keep.has(a))parts.push({inlineData:{mimeType:a.mimeType,data:a.b64}});
+      else if(a.b64)t+='\n\n[첨부파일: '+a.name+' (용량 제한으로 이번 요청에서는 제외됐어요)]';
       else t+='\n\n[이전에 첨부한 파일: '+a.name+' (현재는 내용을 볼 수 없어요)]';
     });
     parts.unshift({text:t});return{role:isUser(m)?'user':'model',parts};
