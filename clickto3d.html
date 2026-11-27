@@ -406,14 +406,31 @@
     $('statusText').textContent = text;
   }
 
+  /* 큰 사진은 긴 변 1600px 이하 JPEG로 줄여서 전송 (Gemini 요청 한도 초과 방지) */
+  function shrinkImage(url, mime, cb){
+    var img = new Image();
+    img.onload = function(){
+      var M = 1600, w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) <= M && url.length < 4000000) { cb(url, mime); return; }
+      var k = Math.min(1, M / Math.max(w, h)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+      var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL('image/jpeg', 0.88), 'image/jpeg');
+    };
+    img.onerror = function(){ setStatus('err', '이미지를 읽을 수 없어요. 다른 파일로 시도해 주세요.'); };
+    img.src = url;
+  }
+
   function handleFile(file){
     if (!file.type.startsWith('image/')) { setStatus('err', '이미지 파일만 올릴 수 있어요.'); return; }
     var reader = new FileReader();
     reader.onload = function(){
-      cur.mime = file.type; cur.base64 = String(reader.result).split(',')[1];
-      previewImg.src = reader.result;
-      $('fileName').textContent = file.name.length > 22 ? file.name.slice(0, 19) + '...' : file.name;
-      preview.style.display = 'block'; dropzone.style.display = 'none'; updateGo();
+      shrinkImage(String(reader.result), file.type, function(url, mime){
+        cur.mime = mime; cur.base64 = url.split(',')[1];
+        previewImg.src = url;
+        $('fileName').textContent = file.name.length > 22 ? file.name.slice(0, 19) + '...' : file.name;
+        preview.style.display = 'block'; dropzone.style.display = 'none'; updateGo();
+      });
     };
     reader.readAsDataURL(file);
   }
@@ -487,7 +504,8 @@
     };
     try {
       var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) });
-      var data = await res.json();
+      var data;
+      try { data = await res.json(); } catch (e) { throw new Error('서버 응답을 읽지 못했어요 (HTTP ' + res.status + '). 잠시 후 다시 시도해 주세요.'); }
       if (!res.ok) throw new Error((data && data.error && data.error.message) || ('요청이 거부됐어요 (HTTP ' + res.status + ')'));
       var cand = data.candidates && data.candidates[0];
       var part = cand && cand.content && cand.content.parts && cand.content.parts.find(function(p){ return typeof p.text === 'string'; });
@@ -557,8 +575,7 @@
     $('tbDate').textContent = new Date().toLocaleString('ko-KR', { hour12: false });
     $('tbStatus').textContent = '분석 완료';
 
-    ensureViewer();
-    showShape(r.vertices, safeHex(r.primary_color) || safeHex(r.colors && r.colors[0]) || '#21D67A');
+    if (ensureViewer()) showShape(r.vertices, safeHex(r.primary_color) || safeHex(r.colors && r.colors[0]) || '#21D67A');
   }
 
   $('copyVerts').addEventListener('click', function(){
@@ -572,15 +589,25 @@
   var viewerWrap = $('viewer'), labelLayer = $('labelLayer');
   var scene, camera, renderer, group, viewerReady = false;
   var dragging = false, lastX = 0, lastY = 0, rotX = 0.45, rotY = 0.7, dist = 3.4, autoRotate = true;
-  var currentPts = [], labelEls = [];
+  var currentPts = [], labelEls = [], viewerFailed = false;
 
   function ensureViewer(){
-    if (viewerReady) { resizeViewer(); return; }
+    if (viewerFailed) return false;
+    if (viewerReady) { resizeViewer(); return true; }
+    var w = viewerWrap.clientWidth, h = viewerWrap.clientHeight;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch (err) {
+      renderer = null; viewerFailed = true; labelLayer.style.display = 'none';
+      var msg = document.createElement('div');
+      msg.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#9B9BA3;font-size:13px;line-height:1.6';
+      msg.textContent = '이 브라우저에서는 3D 보기를 쓸 수 없어요 (WebGL 미지원). 꼭짓점 좌표 표는 그대로 볼 수 있어요.';
+      viewerWrap.appendChild(msg);
+      return false;
+    }
     viewerReady = true;
     scene = new THREE.Scene();
-    var w = viewerWrap.clientWidth, h = viewerWrap.clientHeight;
     camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 100);
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(w, h);
     viewerWrap.insertBefore(renderer.domElement, labelLayer);
@@ -602,6 +629,7 @@
     }, { passive: false });
     window.addEventListener('resize', resizeViewer);
     animate();
+    return true;
   }
   function resizeViewer(){
     if (!renderer) return;
@@ -640,6 +668,8 @@
   }
 
   function showShape(vertices, colorHex){
+    var MAXP = 40;   /* 볼록껍질 계산이 점 개수의 4제곱에 비례하므로 상한을 둔다 */
+    if (vertices.length > MAXP) { var stp = vertices.length / MAXP; vertices = Array.apply(null, { length: MAXP }).map(function(_, i){ return vertices[Math.floor(i * stp)]; }); }
     while (group.children.length) group.remove(group.children[0]);
     labelLayer.innerHTML = ''; labelEls = [];
 
