@@ -6,31 +6,9 @@
     <title>D-AI | 3D Blueprint</title>
     <meta name="description" content="입체도형 사진에서 꼭짓점 좌표를 뽑아 돌려볼 수 있는 3D 모형으로 만들어 드려요.">
     <link rel="icon" href="img/favicon.png" type="image/png">
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        bg: "#000000",
-                        surface: "#18181B",
-                        line: "#2A2A2E",
-                        mute: "#9B9BA3",
-                        ink: "#FFFFFF",
-                        mint: "#21D67A",
-                        blue: "#3B9EFF",
-                        discord: "#5865F2",
-                    },
-                    fontFamily: {
-                        sans: ["Pretendard Variable", "Pretendard", "sans-serif"],
-                    },
-                },
-            },
-        };
-    </script>
 
     <style>
         :root {
@@ -203,6 +181,7 @@
         .adv-panel{display:none}.adv-panel.open{display:block}
         .preview{display:none}
     </style>
+    <link rel="stylesheet" href="tailwind.css">
 </head>
 <body class="min-h-screen flex flex-col font-sans antialiased">
 
