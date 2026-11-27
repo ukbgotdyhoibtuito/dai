@@ -93,8 +93,17 @@ function dataIO(host){
   $('#st-imp').onclick=()=>D.pickJSON(async j=>{
     const d=j&&j.data;if(!d||!Array.isArray(d.chars)||!Array.isArray(d.rooms))return D.toast('이 사이트의 내보내기 파일이 아니에요.','error');
     if(!await D.confirm('불러올까요?','현재 캐릭터와 세계관이 파일 내용으로 교체돼요.',{danger:true,okText:'불러오기'}))return;
-    pending.clear();tok++;S={mode:S.mode,userName:d.userName||'나',curChar:(d.chars[0]||{}).id||null,curRoom:(d.rooms[0]||{}).id||null,chars:d.chars,rooms:d.rooms};
-    S.chars.forEach(c=>{c.convs=c.convs||[]});S.rooms.forEach(r=>{r.members=r.members||[];r.log=r.log||[];r.dms=r.dms||{};r.view='group'});
+    const ok=x=>x&&typeof x==='object'&&!Array.isArray(x),okMsg=e=>ok(e)&&typeof e.text==='string';
+    const chars=d.chars.filter(ok),rooms=d.rooms.filter(ok);
+    chars.forEach(c=>{c.id=c.id||uid();c.name=String(c.name||'캐릭터');c.personality=c.personality||'';c.greeting=c.greeting||'';if(c.hue==null)c.hue=275;
+      c.convs=(Array.isArray(c.convs)?c.convs:[]).filter(ok);
+      c.convs.forEach(v=>{v.id=v.id||uid();v.title=v.title||'대화';v.messages=(Array.isArray(v.messages)?v.messages:[]).filter(okMsg);v.updatedAt=v.updatedAt||Date.now();v.createdAt=v.createdAt||v.updatedAt});
+      if(!c.convs.some(v=>v.id===c.curConv))c.curConv=(c.convs[0]||{}).id||null});
+    rooms.forEach(r=>{r.id=r.id||uid();r.name=String(r.name||'세계관');r.lore=r.lore||'';r.auto=!!r.auto;r.view='group';
+      r.members=(Array.isArray(r.members)?r.members:[]).filter(m=>ok(m)&&m.id);r.members.forEach(m=>{m.name=String(m.name||'멤버');m.persona=m.persona||'';if(m.hue==null)m.hue=275});
+      r.log=(Array.isArray(r.log)?r.log:[]).filter(okMsg);r.dms=ok(r.dms)?r.dms:{};
+      for(const k of Object.keys(r.dms))r.dms[k]=(Array.isArray(r.dms[k])?r.dms[k]:[]).filter(okMsg)});
+    pending.clear();tok++;S={mode:S.mode,userName:d.userName||'나',curChar:(chars[0]||{}).id||null,curRoom:(rooms[0]||{}).id||null,chars,rooms};
     save();render();D.toast('불러왔어요.');
   });
 }
@@ -154,6 +163,7 @@ function editRoom(room){
       d.name=d.name.trim();if(!d.name)return D.toast('세계관 이름을 입력해 주세요.','error');
       d.members=d.members.filter(x=>x.name.trim());d.members.forEach(x=>x.name=x.name.trim());
       if(!d.members.length)return D.toast('멤버를 한 명 이상 넣어 주세요.','error');
+      if(!isNew){d.log=room.log;d.dms=room.dms}   // 설정 창을 여는 동안 새로 쌓인 대화를 덮어쓰지 않도록 현재 대화·DM 유지
       for(const k of Object.keys(d.dms))if(!mem(d,k))delete d.dms[k];
       if(d.view!=='group'&&!mem(d,d.view))d.view='group';
       if(isNew){S.rooms.push(d);S.curRoom=d.id}else Object.assign(room,d);
